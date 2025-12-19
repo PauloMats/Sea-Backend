@@ -1,14 +1,159 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums para padronizar status e tipos
+enum UserRole {
+  ADMIN
+  PSYCHOLOGIST
+  PATIENT
+}
+
+enum MoodLevel {
+  VERY_SAD     // 1
+  SAD          // 2
+  NEUTRAL      // 3
+  HAPPY        // 4
+  VERY_HAPPY   // 5
+}
+
+enum RiskLevel {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+// --- TABELAS PRINCIPAIS ---
+
+// Tabela base de usuários (Auth)
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Hash
+  name      String
+  role      UserRole @default(PATIENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relações opcionais (dependendo da role)
+  psychologistProfile PsychologistProfile?
+  patientProfile      PatientProfile?
+
+  @@map("users")
+}
+
+// Perfil do Psicólogo
+model PsychologistProfile {
+  id        String @id @default(uuid())
+  userId    String @unique
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  crp       String // Registro profissional
+  bio       String?
+  phone     String?
+  
+  // Código que ele envia para o paciente se cadastrar
+  inviteCode String @unique @default(cuid()) 
+
+  // Relação: Um psicólogo tem vários pacientes
+  patients  PatientProfile[]
+
+  @@map("psychologist_profiles")
+}
+
+// Perfil do Paciente
+model PatientProfile {
+  id             String @id @default(uuid())
+  userId         String @unique
+  user           User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  dateOfBirth    DateTime?
+  emergencyPhone String?
+  
+  // Vínculo com o Psicólogo (Pode ser nulo inicialmente até ele vincular)
+  psychologistId String?
+  psychologist   PsychologistProfile? @relation(fields: [psychologistId], references: [id])
+
+  // Dados coletados
+  checkins       DailyCheckin[]
+  biometrics     BiometricEntry[]
+  alerts         RiskAlert[]
+
+  @@map("patient_profiles")
+}
+
+// --- TABELAS DE DADOS (MONITORAMENTO) ---
+
+// Check-in Subjetivo (O que o paciente diz/sente)
+// Preenchido via App Mobile diariamente
+model DailyCheckin {
+  id        String    @id @default(uuid())
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  date      DateTime  @default(now()) // Data do registro
+  
+  mood      MoodLevel // Humor 1-5
+  tags      String[]  // Ex: ["Ansiedade", "Insônia", "Trabalho"]
+  
+  note      String?   @db.Text // Texto livre do diário
+  audioUrl  String?   // URL do áudio se houver (bucket S3/Firebase)
+  
+  // Campo gerado pela IA (Resumo do sentimento do texto/audio)
+  aiSummary String?   @db.Text 
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId, date])
+  @@map("daily_checkins")
+}
+
+// Dados Biométricos Objetivos (O que o corpo diz)
+// Dados vindos do Wearable (HealthConnect/AppleHealth)
+// Normalizados pelo Backend
+model BiometricEntry {
+  id        String   @id @default(uuid())
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  timestamp DateTime // Hora exata da medição
+  
+  // Métricas Core (Colunas dedicadas para performance de query)
+  heartRateAvg Int?     // Média BPM no intervalo
+  heartRateMax Int?     // Pico BPM
+  stepCount    Int?     
+  sleepMinutes Int?     // Total de sono em minutos (se for registro diário)
+  stressLevel  Int?     // 1-100 (comum em Garmin/Samsung)
+  
+  // Flexibilidade: JSON para guardar dados crus ou extras (ex: fases do sono detalhadas)
+  rawData      Json?    
+
+  createdAt    DateTime @default(now())
+
+  @@index([patientId, timestamp])
+  @@map("biometric_entries")
+}
+
+// Alertas de Risco (Gerados pela IA ou Regras)
+// Ex: Se (BPM > 120 E Mood == VERY_SAD) -> Gera Alerta
+model RiskAlert {
+  id        String    @id @default(uuid())
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  level     RiskLevel
+  reason    String    // Ex: "Taquicardia noturna detectada + Relato de Pânico"
+  
+  isViewed  Boolean   @default(false) // Se o psicólogo já viu
+  viewedAt  DateTime?
+
+  createdAt DateTime  @default(now())
+
+  @@map("risk_alerts")
 }
