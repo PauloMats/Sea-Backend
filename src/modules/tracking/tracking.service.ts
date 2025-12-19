@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBiometricDto } from './dto/create-biometric.dto';
 import { CreateCheckinDto } from './dto/create-checkin.dto';
 
@@ -57,8 +57,10 @@ export class TrackingService {
       where: { userId },
     });
 
-    // Simulação de chamada de IA (Isso iria para um serviço separado depois)
-    const aiSummary = await this.mockAnalyzeSentiment(data.note, data.mood);
+    if (!patient) {
+      throw new Error('Patient profile not found');
+    }
+
 
     return this.prisma.dailyCheckin.create({
       data: {
@@ -66,7 +68,6 @@ export class TrackingService {
         mood: data.mood,
         tags: data.tags,
         note: data.note,
-        aiSummary: aiSummary,
         // audioUrl seria processado via upload antes
       },
     });
