@@ -58,8 +58,7 @@ model PsychologistProfile {
   bio       String?
   phone     String?
   
-  // Código que ele envia para o paciente se cadastrar
-  inviteCode String @unique @default(cuid()) 
+  inviteCode String @unique 
 
   // Relação: Um psicólogo tem vários pacientes
   patients  PatientProfile[]
